@@ -1,0 +1,71 @@
+<Ui>
+	<ScrollFrame name="DetoxWhitelistScrollTemplate" inherits="HybridScrollFrameTemplate" virtual="true">
+		<Anchors>
+			<Anchor point="TOPLEFT" x="0" y="0"/>
+			<Anchor point="BOTTOMRIGHT" x="-20" y="3"/>
+		</Anchors>
+		<Frames>
+			<Slider parentKey="scrollBar" inherits="HybridScrollBarTrimTemplate">
+				<Anchors>
+					<Anchor point="TOPLEFT" relativePoint="TOPRIGHT" x="1" y="-16"/>
+					<Anchor point="BOTTOMLEFT" relativePoint="BOTTOMRIGHT" x="1" y="12"/>
+				</Anchors>
+			</Slider>
+		</Frames>
+	</ScrollFrame>
+	
+	<Frame name="DetoxWhitelistButtonTemplate" virtual="true">
+        <Size x="0" y="24"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture parentKey="Background" setAllPoints="true">
+                    <Color r="0" g="0" b="0" a="0.2"/>					
+                </Texture>
+				<Texture parentKey="Highlight" setAllPoints="true" alphaMode="ADD" hidden="true">
+                    <Color r="1" g="0.75" b="0" a="0.2"/>
+                </Texture>
+				<FontString parentKey="Text" inherits="GameFontHighlight" justifyH="LEFT">
+					<Anchors>
+						<Anchor point="LEFT" x="2"/>
+						<Anchor point="RIGHT" relativeKey="$parent.DeleteButton" x="-8" y="0"/>
+					</Anchors>
+				</FontString>
+            </Layer>
+        </Layers>
+        <Frames>
+            <Button parentKey="DeleteButton" alpha="0">
+                <Size x="16" y="16"/>
+				<Anchors>
+                    <Anchor point="RIGHT" x="-4" y="0"/>
+                </Anchors>
+                <NormalTexture setAllPoints="true" atlas="transmog-icon-remove"/>
+                <HighlightTexture setAllPoints="true" atlas="transmog-icon-remove" alphaMode="ADD"/>
+                <Scripts>
+					<OnEnter>
+						self:SetAlpha(1)
+						self:GetParent().Highlight:Show()
+					</OnEnter>
+					<OnLeave>
+						self:SetAlpha(0)
+						self:GetParent().Highlight:Hide()
+					</OnLeave>
+                    <OnClick>
+                        
+                    </OnClick>
+					<OnMouseDown>self:SetScale(0.9)</OnMouseDown>
+					<OnMouseUp>self:SetScale(1)</OnMouseUp>
+                </Scripts>
+            </Button>
+        </Frames>
+		<Scripts>
+			<OnEnter>
+				self.Highlight:Show()
+				self.DeleteButton:SetAlpha(1)
+			</OnEnter>
+			<OnLeave>
+				self.Highlight:Hide()
+				self.DeleteButton:SetAlpha(0)
+			</OnLeave>
+		</Scripts>
+    </Frame>
+</Ui>
