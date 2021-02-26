@@ -1,6 +1,6 @@
 # Detox
 
-Detox is an addon for World of Warcraft that automatically hides toxic chat messages.
+Detox is an addon for World of Warcraft that automatically hides toxic chat messages. Available on CurseForge: https://www.curseforge.com/wow/addons/detox
 
 ### Features
 - Whitelist players so their messages are never filtered
