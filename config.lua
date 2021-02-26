@@ -63,6 +63,9 @@ config.profileDefaults = function()
 	end
 	t["showNotification"] = true
 	t["whitelist"] = {}
+	t["whitelistFriends"] = true
+	t["whitelistGuild"] = true
+	t["whitelistBnet"] = true
 	return t
 end
 
@@ -98,15 +101,50 @@ config.detoxOptions = {
 					set = function(info, key, val) Detox.db.profile[key] = val end,
 					get = function(info, key) return Detox.db.profile[key] end
 				},
-				otherOptions = {
+				whitelistOptions = {
 					name = "Whitelist Players",
 					type = "group",
 					inline = true,
 					args = {
-						whitelistOptions = {
+						whitelistDescription = {
+							name = "Messages from whitelisted players will never be filtered",
+							type = "description",
+							order = 0
+						},
+						whitelistFriends = {
+							name = "Friends",
+							desc = "Whitelist all friends",
+							type = "toggle",
+							order = 10,
+							set = function(info, val) Detox.db.profile.whitelistFriends = val end,
+							get = function(info) return Detox.db.profile.whitelistFriends end
+						},
+						whitelistBnet = {
+							name = "Battle.net Friends",
+							desc = "Whitelist all BattleTag friends",
+							type = "toggle",
+							order = 15,
+							set = function(info, val) Detox.db.profile.whitelistBnet = val end,
+							get = function(info) return Detox.db.profile.whitelistBnet end
+						},
+						whitelistGuild = {
+							name = "Guild Members",
+							desc = "Whitelist all guild members",
+							type = "toggle",
+							order = 20,
+							set = function(info, val) Detox.db.profile.whitelistGuild = val end,
+							get = function(info) return Detox.db.profile.whitelistGuild end
+						},
+						whitelistPlayersDescription = {
+							name = "\nAdd specific players to whitelist (must include realm name, e.g. PlayerName-Realm)",
+							type = "description",
+							order = 50
+						},
+						whitelistPlayers = {
 							name = "Open Whitelist",
-							desc = "Messages from whitelisted players will never be filtered",
+							desc = "Whitelist named players",
 							type = "execute",
+							order = 60,
 							func = function() config:ShowWhitelistFrame() end
 						}
 					}
