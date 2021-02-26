@@ -30,13 +30,32 @@ local function RecreateChat(chat)
 	local timestampStr = date("%X", chat.timestamp)
 	-- If chat is a Bnet whisper, senderGuid may be invalid
 	if chat.event == "CHAT_MSG_BN_WHISPER" then
-		return string.format("%s %s said: %s", chat.sender, nameStr, message)
+		return string.format("%s %s said: %s", timestampStr, chat.sender, message)
 	else
 		local locClass, engClass, locRace, engRace, gender, name, realm = GetPlayerInfoByGUID(chat.senderGuid)
 		local _, _, _, classColorHex = GetClassColor(engClass)
 		local nameStr = string.format("|c%s%s|r", classColorHex, name)
 		return string.format("%s %s said: %s", timestampStr, nameStr, message)
 	end
+end
+
+local function IsTrustedSender(senderName, senderGuid)
+	-- Check if message sender is the player (self) or whitelisted
+	if senderGuid then
+		if IsPlayerGuid(senderGuid) or 
+		(Detox.db.profile.whitelistFriends and C_FriendList.IsFriend(senderGuid)) or
+		(Detox.db.profile.whitelistGuild and IsGuildMember(senderGuid)) or
+		(Detox.db.profile.whitelistBnet and C_BattleNet.GetAccountInfoByGUID(senderGuid)['isFriend']) then
+			return true
+		end
+	end
+	
+	if senderName then
+		if config:IsWhitelisted(senderName) then
+			return true
+		end
+	end
+	return false
 end
 
 local chatBubbleEnabled = C_CVar.GetCVar("chatBubbles")
@@ -98,7 +117,7 @@ end
 function Detox:OnEnable()
 	self:RawHook("ChatFrame_MessageEventHandler", true)
 	self.enabled = true
-	Print("Starting message filtering (/detox for options)")
+	Print("Message filter enabled (/detox for options)")
 end
 
 function Detox:OnDisable()
@@ -151,7 +170,7 @@ function Detox:ChatFrame_MessageEventHandler(this, event, ...)
 	if Detox.enabled then
 		-- Get the key of the chatTypes table for this particular event (e.g. 'say') and check if the channel filter is enabled
 		local chatKey = config.chatTypesEvents[event]
-		if self.db.profile[chatKey] and not IsPlayerGuid(senderGuid) and not config:IsWhitelisted(sender) then
+		if self.db.profile[chatKey] and not IsTrustedSender(sender, senderGuid) then
 			if message and self:Classify(message) then
 				self.db.global.blockedCount = self.db.global.blockedCount + 1
 				detoxHiddenChats[chatLineID] = {
