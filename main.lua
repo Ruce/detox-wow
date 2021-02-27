@@ -96,7 +96,7 @@ end)
 function Detox:OnInitialize()
 	self.enabled = true
 	
-	self.db = LibStub("AceDB-3.0"):New("DetoxDB", { profile = config.profileDefaults() })
+	self.db = LibStub("AceDB-3.0"):New("DetoxDB", { profile = config.profileDefaults() }, true)
 	self.db.RegisterCallback(self, "OnProfileChanged", "RefreshConfig")
 	self.db.RegisterCallback(self, "OnProfileCopied", "RefreshConfig")
 	self.db.RegisterCallback(self, "OnProfileReset", "RefreshConfig")
@@ -133,6 +133,23 @@ function Detox:RefreshConfig()
 	end
 end
 
+function Detox:ShowHiddenChats()
+	local sortedIds = {}
+	for id, chat in pairs(detoxHiddenChats) do
+		if not chat.shown then
+			table.insert(sortedIds, id)
+		end
+	end
+	table.sort(sortedIds)
+	
+	for _, id in ipairs(sortedIds) do
+		local chat = detoxHiddenChats[id]
+		Print(RecreateChat(chat), SELECTED_CHAT_FRAME)
+		chat.shown = true
+		detoxHiddenChats[id] = chat
+	end
+end
+
 Detox:RegisterChatCommand("detox", "SlashProcessorFunc")
 Detox:RegisterChatCommand("dtx", "SlashProcessorFunc")
 
@@ -150,13 +167,7 @@ function Detox:SlashProcessorFunc(input)
 	end
 	
 	if command == 'show' then
-		for k, chat in pairs(detoxHiddenChats) do
-			if not chat.shown then
-				Print(RecreateChat(chat), SELECTED_CHAT_FRAME)
-				chat.shown = true
-				detoxHiddenChats[k] = chat
-			end
-		end
+		self:ShowHiddenChats()
 	end
 end
 
