@@ -1,5 +1,8 @@
 local _, addonTbl = ...
 
+BINDING_HEADER_DETOX = "Detox"
+BINDING_NAME_DETOX_SHOW_MESSAGES = "Show Detox Messages"
+
 local AceGUI = LibStub("AceGUI-3.0")
 local config = {}
 
@@ -87,6 +90,7 @@ config.detoxOptions = {
 							name = "Show Notifications",
 							desc = "If disabled, you will not be notified of hidden toxic messages. Use at your own risk!",
 							type = "toggle",
+							order = 10,
 							set = function(info, val) Detox.db.profile.showNotification = val end,
 							get = function(info) return Detox.db.profile.showNotification end
 						}
