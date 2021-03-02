@@ -45,7 +45,7 @@ local function IsTrustedSender(senderName, senderGuid)
 		if IsPlayerGuid(senderGuid) or 
 		(Detox.db.profile.whitelistFriends and C_FriendList.IsFriend(senderGuid)) or
 		(Detox.db.profile.whitelistGuild and IsGuildMember(senderGuid)) or
-		(Detox.db.profile.whitelistBnet and C_BattleNet.GetAccountInfoByGUID(senderGuid)['isFriend']) then
+		(Detox.db.profile.whitelistBnet and C_BattleNet.GetAccountInfoByGUID(senderGuid) and C_BattleNet.GetAccountInfoByGUID(senderGuid)['isFriend']) then
 			return true
 		end
 	end
@@ -93,6 +93,19 @@ chatBubbleListener:SetScript("OnUpdate", function(self, elapsed)
 	self:Stop()
 end)
 
+function Detox:InitializeDb()
+	if self.db.global.blockedCount == nil then
+		self.db.global.blockedCount = 0
+	end
+	
+	local profileDefaults = config.profileDefaults()
+	for k, v in pairs(profileDefaults) do
+		if self.db.profile[k] == nil then
+			self.db.profile[k] = v
+		end
+	end
+end
+
 function Detox:OnInitialize()
 	self.enabled = true
 	
@@ -107,10 +120,10 @@ function Detox:OnInitialize()
 	
 	self:RawHook("ChatFrame_OnHyperlinkShow", true)
 	
-	if self.db.global.blockedCount == nil then
-		self.db.global.blockedCount = 0
-	end
-	
+	-- Initialize DB values
+	-- This is needed even though some values are already set in the default profile
+	-- Because existing profiles will not have new variables when upgrading the addon
+	self:InitializeDb()
 	self:RefreshConfig()
 end
 
@@ -171,14 +184,14 @@ function Detox:SlashProcessorFunc(input)
 	end
 end
 
-function Detox:ChatFrame_MessageEventHandler(this, event, ...)
+function Detox:ParseMessage(chatFrame, event, ...)
 	local args = {...}
 	local message = args[1]
 	local sender = args[2]
 	local senderGuid = args[12]
 	local chatLineID = args[11]
 	
-	if Detox.enabled then
+	if self.enabled then
 		-- Get the key of the chatTypes table for this particular event (e.g. 'say') and check if the channel filter is enabled
 		local chatKey = config.chatTypesEvents[event]
 		if self.db.profile[chatKey] and not IsTrustedSender(sender, senderGuid) then
@@ -201,12 +214,20 @@ function Detox:ChatFrame_MessageEventHandler(this, event, ...)
 				if self.db.profile.showNotification then
 					local hyperlink = "detox:show:" .. tostring(chatLineID)
 					local modifiedMessage = string.format("%s|H%s|h%s|h", detoxSecondaryColorStr, hyperlink, detoxChatHiddenMessage)
-					return self.hooks["ChatFrame_MessageEventHandler"](this, event, modifiedMessage, select(2, ...))
+					return self.hooks["ChatFrame_MessageEventHandler"](chatFrame, event, modifiedMessage, select(2, ...))
 				else
 					return nil
 				end
 			end
 		end
+	end
+	return self.hooks["ChatFrame_MessageEventHandler"](chatFrame, event, ...)
+end
+
+function Detox:ChatFrame_MessageEventHandler(this, event, ...)
+	local status, result = pcall(self.ParseMessage, self, this, event, ...)
+	if status then
+		return result
 	end
 	return self.hooks["ChatFrame_MessageEventHandler"](this, event, ...)
 end
