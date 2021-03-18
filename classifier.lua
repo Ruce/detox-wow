@@ -1,11 +1,18 @@
+local _, addonTbl = ...
+local classifier = {}
+local dense = addonTbl.dense
+local lstm = addonTbl.lstm
+local lruCache = addonTbl.lru
+local data = addonTbl.data
+
 local tinsert = table.insert
 local tremove = table.remove
 
-local function known(words, dictionary)
+local function known(words, dictionary, minLength)
 	local knownWords = {}
+	local minLength = minLength or 0
 	for _, word in ipairs(words) do
-		local result = dictionary[word]
-		if result then
+		if string.len(word) > minLength and dictionary[word] then
 			tinsert(knownWords, word)
 		end
 	end
@@ -25,14 +32,14 @@ end
 
 -- Check if both parts of split are known words, i.e. missing space between words
 -- E.g. helloworld -> { "hello", "world" }
-local function separates(splits, dictionary)
+local function separates(splits, dictionary, minLength)
 	local t = {}
 	for _, v in ipairs(splits) do
 		local left = v[1]
 		local right = v[2]
 		if right and right ~= "" then
-			local leftKnown = known({left}, dictionary)
-			local rightKnown = known({right}, dictionary)
+			local leftKnown = known({left}, dictionary, minLength)
+			local rightKnown = known({right}, dictionary, minLength)
 			if #leftKnown == 1 and #rightKnown == 1 then
 				tinsert(t, left)
 				tinsert(t, right)
@@ -132,43 +139,25 @@ local function removeFormatting(message)
 	return cleanMessage
 end
 
-function Detox:Classify(message)
-	local dictionary = Detox.Dictionary
-	local validCharacters = Detox.EnglishCharacters
-	local characterMap = Detox.QwertyMap
-	local separators = Detox.Separators
+function classifier:SpellCheck(word)
+	local dictionary = self.dictionary
+	local validCharacters = self.validCharacters
+	local characterMap = self.characterMap
 	
-	local cleanMessage = removeFormatting(message)
-	cleanMessage = string.lower(cleanMessage)
-	local tokens = self:Tokenise(cleanMessage, validCharacters, separators)
-	local toxic = false
-	for _, token in pairs(tokens) do
-		if string.len(token) > 2 then
-			local knownWords = self:SpellCheck(token, dictionary, validCharacters, characterMap)
-			for _, word in ipairs(knownWords) do
-				if dictionary[word][1] > 0.5 then
-					toxic = true
-					return toxic
-				end
-			end
-		end
-	end
+	-- For short words, don't offer alternative words as there can be too many false positives
+	local minLength = 2
 	
-	return toxic
-end
-
-function Detox:SpellCheck(word, dictionary, validCharacters, characterMap)
 	-- Inspired by http://norvig.com/spell-correct.html
-	local knownWord = known({word}, dictionary)
+	local knownWord = known({word}, dictionary, 0)
 	if #knownWord == 1 then
-		return knownWord
-	else
+		return {}
+	elseif string.len(word) > minLength then
 		local splitCharacters = split(word)
-		local deletedWords = known(deletes(splitCharacters), dictionary)
-		local transposedWords = known(transposes(splitCharacters), dictionary)
-		local replacedWords = known(replaces(splitCharacters, characterMap), dictionary)
-		local insertedWords = known(inserts(splitCharacters, validCharacters), dictionary)
-		local separatedWords = separates(splitCharacters, dictionary)
+		local deletedWords = known(deletes(splitCharacters), dictionary, minLength)
+		local transposedWords = known(transposes(splitCharacters), dictionary, minLength)
+		local replacedWords = known(replaces(splitCharacters, characterMap), dictionary, minLength)
+		local insertedWords = known(inserts(splitCharacters, validCharacters), dictionary, minLength)
+		local separatedWords = separates(splitCharacters, dictionary, minLength)
 		
 		local possibleWords = {}
 		insertToTable(possibleWords, deletedWords)
@@ -179,23 +168,24 @@ function Detox:SpellCheck(word, dictionary, validCharacters, characterMap)
 		
 		return deduplicate(possibleWords)
 	end
+	return nil
 end
 
-function Detox:Tokenise(message, validCharacters, separators)
+function classifier:Tokenise(message)
 	local tokens = {}
 	local curtok = '' -- Current token
 	local L = string.len(message)
 	for i = 1, L do
 		local c = string.sub(message, i, i)
 		-- Reached a separator, save current token if it isn't blank
-		if separators[c] then
+		if self.separators[c] then
 			-- Do not combine with above if statement. In case of overlap between separator and validCharacter table, this order of operation prioritises separators.
 			if curtok ~= '' then
 				tinsert(tokens, curtok)
 				curtok = ''
 			end
 		-- Not a separator character, append to token if it is a valid character
-		elseif validCharacters[c] then
+		elseif self.validCharacters[c] then
 			curtok = curtok..c
 		end
 	end
@@ -204,3 +194,152 @@ function Detox:Tokenise(message, validCharacters, separators)
 	end
 	return tokens
 end
+
+function classifier:ProcessTokens(tokens)
+	-- Run spellCheck against tokens to see if it is a known word, and if not get suggested alternative words
+	-- Calculate the maximum number of alternative words to try predicting, based on the self.maxPasses limit
+	-- Returns a list of tables with keys `token`, `knownWords`, and `alternativeWords`
+	local processedTokens = {}
+	if #tokens == 0 then return {} end
+	
+	local numAlternativeWords = 0
+	local bins = 0
+	for _, token in ipairs(tokens) do
+		local knownWords = self:SpellCheck(token)
+		if knownWords and #knownWords > 0 then
+			numAlternativeWords = numAlternativeWords + #knownWords
+			bins = bins + 1
+		end
+		local t = { ['token'] = token, ['knownWords'] = knownWords, ['alternativeWords'] = {} }
+		tinsert(processedTokens, t)
+	end
+	
+	local maxAlternatives = math.floor(self.maxPasses / #tokens) - 1
+	if numAlternativeWords <= maxAlternatives then
+		for _, pToken in ipairs(processedTokens) do
+			pToken['alternativeWords'] = pToken['knownWords']
+		end
+	else
+		-- Recursively allocate "budget" of maxAlternatives evenly between the tokens
+		local remainder = maxAlternatives
+		local depth = 0
+		while remainder > 0 and bins > 0 do
+			local k = math.floor(remainder / bins)
+			if k <= 0 then -- Cannot evenly divide up rest of the remainder
+				local counter = 0
+				for _, pToken in ipairs(processedTokens) do
+					if pToken['knownWords'][depth + 1] then
+						tinsert(pToken['alternativeWords'], pToken['knownWords'][depth + 1])
+						remainder = remainder - 1
+						if remainder <= 0 then break end
+					end
+				end
+				remainder = 0
+			else
+				for _, pToken in ipairs(processedTokens) do
+					if #pToken['knownWords'] > depth then
+						for i = depth + 1, depth + k do
+							if pToken['knownWords'][i] then
+								tinsert(pToken['alternativeWords'], pToken['knownWords'][i])
+								remainder = remainder - 1
+							end
+						end
+						if #pToken['alternativeWords'] == #pToken['knownWords'] then bins = bins - 1 end
+					end
+				end
+				depth = depth + k
+			end
+		end
+	end
+	
+	return processedTokens
+end
+
+function classifier:Classify(message)
+	local embeddings = self.embeddings
+	local unk = self.unk
+	local blank = self.blank
+	
+	local cleanMessage = removeFormatting(message)
+	cleanMessage = string.lower(cleanMessage)
+	
+	local tokens = self:Tokenise(cleanMessage)
+	if #tokens == 0 then return false end
+	local tokensStr = table.concat(tokens, " ")
+	
+	-- Check if message result is in cache
+	local cachedResult = self.classifyCache:get(tokensStr)
+	if cachedResult then
+		return cachedResult >= self.toxicThreshold
+	end
+	
+	-- Limit number of forward passes on LSTM layer to reduce processing time
+	-- Future update: Provide option to user for "enhanced mode" for more powerful computers
+	local processedTokens = self:ProcessTokens(tokens)
+	
+	-- Store word embeddings for original tokens as well as alternative tokens suggested by SpellCheck
+	-- E.g. "wordA wordB wordC wordD" vs "wordA alternativeB1 wordC wordD" vs "wordA alternativeB2 wordC wordD" vs "wordA wordB alternativeC1 wordD"
+	local originalTokensEmbeddings = {}
+	local alternativeTokensEmbeddings = {}
+	
+	for _, pToken in ipairs(processedTokens) do
+		local token = pToken.token
+		local tokenEmbedding = embeddings[token] or unk
+		for _, line in ipairs(alternativeTokensEmbeddings) do
+			tinsert(line, tokenEmbedding)
+		end
+		
+		for _, word in ipairs(pToken.alternativeWords) do		
+			local wordEmbedding = embeddings[word] or unk
+			-- Since the original token is not a known word, it is OOV and therefore will be added as UNK to the list
+			-- As such there is no need for alternative tokens that are also UNK to be added to the list
+			if wordEmbedding ~= unk then
+				-- (Shallow) copy the originalTokensEmbeddings table and insert into alternativeTokensEmbeddings
+				origCopy = {unpack(originalTokensEmbeddings)}
+				tinsert(origCopy, wordEmbedding)
+				tinsert(alternativeTokensEmbeddings, origCopy)
+			end
+		end
+		
+		tinsert(originalTokensEmbeddings, tokenEmbedding)
+	end
+	
+	if not self.lstmLayer then self.lstmLayer = lstm:new(data.Weights.LSTM.Kernel, data.Weights.LSTM.Recurrent, data.Weights.LSTM.Bias) end
+	if not self.denseLayer then self.denseLayer = dense:new(data.Weights.Output.Kernel, data.Weights.Output.Bias) end
+	
+	local maxScore = 0
+	tinsert(alternativeTokensEmbeddings, originalTokensEmbeddings)
+	for _, phrase in ipairs(alternativeTokensEmbeddings) do
+		local lstmOutput = self.lstmLayer:Predict(phrase, true)
+		local score = self.denseLayer:Predict(lstmOutput)[1][1]
+		if score > maxScore then maxScore = score end		
+		if score >= self.toxicThreshold then
+			self.classifyCache:set(tokensStr, maxScore)
+			return true
+		end
+	end
+	
+	self.classifyCache:set(tokensStr, maxScore)
+	return false
+end
+
+function classifier:new()
+	newClassifier = {}
+	setmetatable(newClassifier, self)
+	self.__index = self
+	
+	classifier.dictionary = data.Dictionary
+	classifier.validCharacters = data.EnglishCharacters
+	classifier.characterMap = data.QwertyMap
+	classifier.separators = data.Separators
+	classifier.embeddings = data.Embeddings
+	classifier.unk = data.Unk
+	classifier.blank = data.BlankEmbedding
+	classifier.toxicThreshold = 0.99
+	classifier.maxPasses = 512
+	classifier.classifyCache = lruCache.new(5)
+	
+	return newClassifier
+end
+
+addonTbl.classifier = classifier

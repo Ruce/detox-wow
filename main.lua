@@ -7,6 +7,7 @@ local AceConfigDialog = LibStub("AceConfigDialog-3.0")
 local AceGUI = LibStub("AceGUI-3.0")
 
 local config = addonTbl.config
+local classifier = addonTbl.classifier
 
 local detoxPrimaryColorStr = "|cff6DF551"
 local detoxSecondaryColorStr = "|cFF5BCFBB"
@@ -118,6 +119,7 @@ function Detox:OnInitialize()
 	AceConfig:RegisterOptionsTable("Detox", config.detoxOptions)
 	AceConfigDialog:AddToBlizOptions("Detox")
 	
+	self.classifier = classifier:new()
 	self:RawHook("ChatFrame_OnHyperlinkShow", true)
 	
 	-- Initialize DB values
@@ -195,7 +197,7 @@ function Detox:ParseMessage(chatFrame, event, ...)
 		-- Get the key of the chatTypes table for this particular event (e.g. 'say') and check if the channel filter is enabled
 		local chatKey = config.chatTypesEvents[event]
 		if self.db.profile[chatKey] and not IsTrustedSender(sender, senderGuid) then
-			if message and self:Classify(message) then
+			if message and self.classifier:Classify(message) then
 				self.db.global.blockedCount = self.db.global.blockedCount + 1
 				detoxHiddenChats[chatLineID] = {
 					message = message,
