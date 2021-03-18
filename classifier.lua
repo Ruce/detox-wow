@@ -277,8 +277,7 @@ function classifier:Classify(message)
 	-- Future update: Provide option to user for "enhanced mode" for more powerful computers
 	local processedTokens = self:ProcessTokens(tokens)
 	
-	-- Keep track of word embeddings for original tokens as well as alternative tokens suggested by SpellCheck
-	-- Only allow up to one misspelt word in order to minimise number of possible combinations
+	-- Store word embeddings for original tokens as well as alternative tokens suggested by SpellCheck
 	-- E.g. "wordA wordB wordC wordD" vs "wordA alternativeB1 wordC wordD" vs "wordA alternativeB2 wordC wordD" vs "wordA wordB alternativeC1 wordD"
 	local originalTokensEmbeddings = {}
 	local alternativeTokensEmbeddings = {}
@@ -290,8 +289,6 @@ function classifier:Classify(message)
 			tinsert(line, tokenEmbedding)
 		end
 		
-		-- Multiple suggestions from SpellCheck may be UNK (i.e. OOV) and not have a word embedding
-		-- Therefore only add UNK once to the list of possible alternative sentences
 		for _, word in ipairs(pToken.alternativeWords) do		
 			local wordEmbedding = embeddings[word] or unk
 			-- Since the original token is not a known word, it is OOV and therefore will be added as UNK to the list
