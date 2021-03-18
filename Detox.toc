@@ -1,4 +1,4 @@
-## Interface: 90002
+## Interface: 90005
 ## Title: Detox
 ## Author: Vinnesta
 ## Version: 1.2
@@ -17,9 +17,17 @@ libs\AceHook-3.0\AceHook-3.0.xml
 libs\AceLocale-3.0\AceLocale-3.0.xml
 libs\AceGUI-3.0\AceGUI-3.0.xml
 libs\AceConfig-3.0\AceConfig-3.0.xml
+libs\LRUCache\lru.lua
+libs\Matrix\matrix.lua
+
+nn\activation.lua
+nn\dense.lua
+nn\lstm.lua
 
 templates.xml
 config.lua
-main.lua
+
 data.lua
+embeddings.lua
 classifier.lua
+main.lua
