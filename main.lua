@@ -12,7 +12,15 @@ local classifier = addonTbl.classifier
 local detoxPrimaryColorStr = "|cff6DF551"
 local detoxSecondaryColorStr = "|cFF5BCFBB"
 local detoxChatHiddenMessage = "(Detox) Toxic message hidden - click to show"
+local detoxChatThrottledMessage = "(Detox) Throttle Mode: Blocking sender temporarily..."
+local detoxToxicThresholdHigh = 0.99
+local detoxToxicThresholdLow = 0.95
+local detoxThrottleThresholdSec = 15
+local detoxThrottleCooldownSec = 30
+
 local detoxHiddenChats = {}
+local detoxSenderHistory = {}
+local detoxPrevChatLine = {}
 
 -- Local implementation of AceConsole's Print function with custom formatting
 local function Print(message, frame)
@@ -193,17 +201,40 @@ function Detox:ParseMessage(chatFrame, event, ...)
 	local senderGuid = args[12]
 	local chatLineID = args[11]
 	
-	if self.enabled then
+	if self.enabled and message then
+		-- Check if the event was already processed, i.e. when a chat is presented by multiple chatFrames
+		if detoxPrevChatLine['chatLineID'] and detoxPrevChatLine['chatLineID'] == chatLineID then
+			if detoxPrevChatLine['blocked'] then
+				return nil
+			else
+				return self.hooks["ChatFrame_MessageEventHandler"](chatFrame, event, detoxPrevChatLine['message'], select(2, ...))
+			end
+		end
+		
 		-- Get the key of the chatTypes table for this particular event (e.g. 'say') and check if the channel filter is enabled
 		local chatKey = config.chatTypesEvents[event]
 		if self.db.profile[chatKey] and not IsTrustedSender(sender, senderGuid) then
-			if message and self.classifier:Classify(message) then
+			local currTime = time()
+			local toxicThreshold = detoxToxicThresholdHigh
+			detoxPrevChatLine = { ['chatLineID'] = chatLineID, ['blocked'] = false, ['message'] = message }
+			
+			-- Block sender if throttle mode is on and multiple toxic messages were received
+			local senderThrottled = false
+			local senderHist = detoxSenderHistory[sender]
+			if self.db.profile.throttleMode and senderHist and senderHist.blockedTill >= currTime then
+				senderThrottled = true
+				toxicThreshold = detoxToxicThresholdLow
+			end
+			
+			-- Determine if message is toxic
+			local toxic = self.classifier:Classify(message, toxicThreshold)
+			if toxic or senderThrottled then
 				self.db.global.blockedCount = self.db.global.blockedCount + 1
 				detoxHiddenChats[chatLineID] = {
 					message = message,
 					sender = sender,
 					senderGuid = senderGuid,
-					timestamp = time(),
+					timestamp = currTime,
 					event = event,
 					shown = false
 				}
@@ -212,12 +243,32 @@ function Detox:ParseMessage(chatFrame, event, ...)
 				-- After the next frame update, chatBubbleListener will reset chat bubbles to previous setting
 				chatBubbleListener:Start()
 				
+				-- Update SenderHistory with timestamp of latest toxic message
+				local firstThrottle = false
+				if toxic then
+					if senderHist then
+						if currTime - senderHist.prevMessage < detoxThrottleThresholdSec then
+							senderHist.blockedTill = currTime + detoxThrottleCooldownSec
+							firstThrottle = self.db.profile.throttleMode and not senderThrottled
+						end
+						senderHist.prevMessage = currTime
+					else
+						local newHist = { ['prevMessage'] = currTime, ['blockedTill'] = 0 }
+						detoxSenderHistory[sender] = newHist
+					end
+				end
+				
 				-- Notify of a toxic message (if enabled by user)
-				if self.db.profile.showNotification then
+				if self.db.profile.showNotification and not senderThrottled then
 					local hyperlink = "detox:show:" .. tostring(chatLineID)
 					local modifiedMessage = string.format("%s|H%s|h%s|h", detoxSecondaryColorStr, hyperlink, detoxChatHiddenMessage)
+					if firstThrottle then
+						modifiedMessage = string.format("%s|H%s|h%s|h", detoxSecondaryColorStr, hyperlink, detoxChatThrottledMessage)
+					end
+					detoxPrevChatLine['message'] = modifiedMessage
 					return self.hooks["ChatFrame_MessageEventHandler"](chatFrame, event, modifiedMessage, select(2, ...))
 				else
+					detoxPrevChatLine['blocked'] = true
 					return nil
 				end
 			end

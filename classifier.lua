@@ -8,12 +8,33 @@ local data = addonTbl.data
 local tinsert = table.insert
 local tremove = table.remove
 
+-- Count the number of values in a table; the # function only (sort of) works for integer-indexed tables
+local function tableLength(table1)
+	local counter = 0
+	for _,_ in pairs(table1) do
+		counter = counter + 1
+	end
+	return counter
+end
+
+local function shallowCopy(table1)
+	local t = {}
+	for k,v in pairs(table1) do
+		t[k] = v
+	end
+	return t
+end
+
 local function known(words, dictionary, minLength)
 	local knownWords = {}
 	local minLength = minLength or 0
 	for _, word in ipairs(words) do
-		if string.len(word) > minLength and dictionary[word] then
-			tinsert(knownWords, word)
+		if string.len(word) >= minLength then
+			local wordIndex = dictionary[word]
+			if wordIndex then
+				local suggestion = { ['word'] = word, ['index'] = wordIndex }
+				tinsert(knownWords, suggestion)
+			end
 		end
 	end
 	return knownWords
@@ -32,6 +53,7 @@ end
 
 -- Check if both parts of split are known words, i.e. missing space between words
 -- E.g. helloworld -> { "hello", "world" }
+-- Returns list of word pairs: {  { ['word'] = {'par', 'ents'}, ['index'] = {20, 80} }, { ['word'] = {'pare', 'nts'}, ['index'] = {35, 99} }  }
 local function separates(splits, dictionary, minLength)
 	local t = {}
 	for _, v in ipairs(splits) do
@@ -41,8 +63,11 @@ local function separates(splits, dictionary, minLength)
 			local leftKnown = known({left}, dictionary, minLength)
 			local rightKnown = known({right}, dictionary, minLength)
 			if #leftKnown == 1 and #rightKnown == 1 then
-				tinsert(t, left)
-				tinsert(t, right)
+				local suggestion = {
+					['word'] = { leftKnown[1].word, rightKnown[1].word},
+					['index'] = { leftKnown[1].index, rightKnown[1].index}
+				}
+				tinsert(t, suggestion)
 			end
 		end
 	end
@@ -120,12 +145,12 @@ local function insertToTable(table1, table2)
 end
 
 -- Returns a new table with duplicates in table1 removed
-local function deduplicate(table1)
+local function deduplicateWords(table1)
 	local t = {}
 	local deduplicated = {}
 	for i, v in ipairs(table1) do
-		if not t[v] then
-			t[v] = true
+		if not t[v.word] then
+			t[v.word] = true
 			tinsert(deduplicated, v)
 		end
 	end
@@ -140,18 +165,21 @@ local function removeFormatting(message)
 end
 
 function classifier:SpellCheck(word)
+	-- Check if the word is in the dictionary, if not suggest alternative words
+	-- Inspired by http://norvig.com/spell-correct.html
+	-- Returns e.g. { {['word']='hello', ['index']=25}, {['word']='jello', ['index']=75} }
+	-- Where index is the rank of the word's frequency/commonness; 0 = does not have embedding (UNK/OOV)
 	local dictionary = self.dictionary
 	local validCharacters = self.validCharacters
 	local characterMap = self.characterMap
 	
 	-- For short words, don't offer alternative words as there can be too many false positives
-	local minLength = 2
+	local minLength = 3
 	
-	-- Inspired by http://norvig.com/spell-correct.html
 	local knownWord = known({word}, dictionary, 0)
 	if #knownWord == 1 then
 		return {}
-	elseif string.len(word) > minLength then
+	elseif string.len(word) >= minLength then
 		local splitCharacters = split(word)
 		local deletedWords = known(deletes(splitCharacters), dictionary, minLength)
 		local transposedWords = known(transposes(splitCharacters), dictionary, minLength)
@@ -164,9 +192,10 @@ function classifier:SpellCheck(word)
 		insertToTable(possibleWords, transposedWords)
 		insertToTable(possibleWords, replacedWords)
 		insertToTable(possibleWords, insertedWords)
+		possibleWords = deduplicateWords(possibleWords)
 		insertToTable(possibleWords, separatedWords)
 		
-		return deduplicate(possibleWords)
+		return possibleWords
 	end
 	return nil
 end
@@ -195,71 +224,58 @@ function classifier:Tokenise(message)
 	return tokens
 end
 
-function classifier:ProcessTokens(tokens)
-	-- Run spellCheck against tokens to see if it is a known word, and if not get suggested alternative words
-	-- Calculate the maximum number of alternative words to try predicting, based on the self.maxPasses limit
-	-- Returns a list of tables with keys `token`, `knownWords`, and `alternativeWords`
-	local processedTokens = {}
-	if #tokens == 0 then return {} end
-	
-	local numAlternativeWords = 0
-	local bins = 0
-	for _, token in ipairs(tokens) do
-		local knownWords = self:SpellCheck(token)
-		if knownWords and #knownWords > 0 then
-			numAlternativeWords = numAlternativeWords + #knownWords
-			bins = bins + 1
-		end
-		local t = { ['token'] = token, ['knownWords'] = knownWords, ['alternativeWords'] = {} }
-		tinsert(processedTokens, t)
-	end
-	
-	local maxAlternatives = math.floor(self.maxPasses / #tokens) - 1
-	if numAlternativeWords <= maxAlternatives then
-		for _, pToken in ipairs(processedTokens) do
-			pToken['alternativeWords'] = pToken['knownWords']
-		end
-	else
-		-- Recursively allocate "budget" of maxAlternatives evenly between the tokens
-		local remainder = maxAlternatives
-		local depth = 0
-		while remainder > 0 and bins > 0 do
-			local k = math.floor(remainder / bins)
-			if k <= 0 then -- Cannot evenly divide up rest of the remainder
-				local counter = 0
-				for _, pToken in ipairs(processedTokens) do
-					if pToken['knownWords'][depth + 1] then
-						tinsert(pToken['alternativeWords'], pToken['knownWords'][depth + 1])
-						remainder = remainder - 1
-						if remainder <= 0 then break end
-					end
-				end
-				remainder = 0
-			else
-				for _, pToken in ipairs(processedTokens) do
-					if #pToken['knownWords'] > depth then
-						for i = depth + 1, depth + k do
-							if pToken['knownWords'][i] then
-								tinsert(pToken['alternativeWords'], pToken['knownWords'][i])
-								remainder = remainder - 1
-							end
-						end
-						if #pToken['alternativeWords'] == #pToken['knownWords'] then bins = bins - 1 end
-					end
-				end
-				depth = depth + k
-			end
-		end
-	end
-	
-	return processedTokens
-end
-
-function classifier:Classify(message)
+function classifier:GetEmbeddings(tokens)
+	-- Store word embeddings for original tokens as well as alternative tokens suggested by SpellCheck
+	-- E.g. "wordA wordB wordC wordD" vs "wordA alternativeB1 wordC wordD" vs "wordA alternativeB2 wordC wordD" vs "wordA wordB alternativeC1 wordD"
 	local embeddings = self.embeddings
 	local unk = self.unk
 	local blank = self.blank
 	
+	local originalTokensEmbeddings = { ['rank'] = 0 }
+	local alternativeTokensEmbeddings = {}
+	for _, token in ipairs(tokens) do
+		local tokenEmbedding = embeddings[token] or unk
+		for _, line in ipairs(alternativeTokensEmbeddings) do
+			tinsert(line, tokenEmbedding)
+		end
+		
+		-- Run spellCheck against tokens to see if it is a known word, and if not get suggested alternative words
+		local knownWords = self:SpellCheck(token)
+		if knownWords then
+			for _, suggestion in ipairs(knownWords) do
+				local word = suggestion.word
+				local index = suggestion.index
+				local origCopy = shallowCopy(originalTokensEmbeddings)
+				if type(word) == "table" then
+					-- Handle word pairs
+					for i, splitWord in ipairs(word) do
+						local wordEmbedding = embeddings[splitWord] or unk
+						origCopy.rank = origCopy.rank + index[i]
+						tinsert(origCopy, wordEmbedding)
+					end
+				else
+					-- Index represents how common the word is; 0 = does not have embedding (UNK/OOV)
+					-- If the alternative word is OOV, it does not need to be added to the list since the original token is also OOV
+					if index > 0 then
+						local wordEmbedding = embeddings[word] or unk
+						origCopy.rank = origCopy.rank + index
+						tinsert(origCopy, wordEmbedding)
+					end
+				end
+				tinsert(alternativeTokensEmbeddings, origCopy)
+			end
+		end
+		
+		tinsert(originalTokensEmbeddings, tokenEmbedding)
+	end
+	
+	originalTokensEmbeddings.rank = -1
+	tinsert(alternativeTokensEmbeddings, originalTokensEmbeddings)
+	
+	return alternativeTokensEmbeddings
+end
+
+function classifier:Classify(message, toxicThreshold)
 	local cleanMessage = removeFormatting(message)
 	cleanMessage = string.lower(cleanMessage)
 	
@@ -270,56 +286,40 @@ function classifier:Classify(message)
 	-- Check if message result is in cache
 	local cachedResult = self.classifyCache:get(tokensStr)
 	if cachedResult then
-		return cachedResult >= self.toxicThreshold
+		if cachedResult.score >= toxicThreshold then
+			return true
+		elseif cachedResult.threshold >= toxicThreshold or not cachedResult.terminatedEarly then
+			-- Due to early termination of the classifier when threshold is exceeded, the cached result is not necessarily the maximum score
+			-- If the previous threshold used for the cached result is lower than current threshold, the score needs to be recalculated
+			return false
+		end
 	end
 	
-	-- Limit number of forward passes on LSTM layer to reduce processing time
-	-- Future update: Provide option to user for "enhanced mode" for more powerful computers
-	local processedTokens = self:ProcessTokens(tokens)
-	
-	-- Store word embeddings for original tokens as well as alternative tokens suggested by SpellCheck
-	-- E.g. "wordA wordB wordC wordD" vs "wordA alternativeB1 wordC wordD" vs "wordA alternativeB2 wordC wordD" vs "wordA wordB alternativeC1 wordD"
-	local originalTokensEmbeddings = {}
-	local alternativeTokensEmbeddings = {}
-	
-	for _, pToken in ipairs(processedTokens) do
-		local token = pToken.token
-		local tokenEmbedding = embeddings[token] or unk
-		for _, line in ipairs(alternativeTokensEmbeddings) do
-			tinsert(line, tokenEmbedding)
-		end
-		
-		for _, word in ipairs(pToken.alternativeWords) do		
-			local wordEmbedding = embeddings[word] or unk
-			-- Since the original token is not a known word, it is OOV and therefore will be added as UNK to the list
-			-- As such there is no need for alternative tokens that are also UNK to be added to the list
-			if wordEmbedding ~= unk then
-				-- (Shallow) copy the originalTokensEmbeddings table and insert into alternativeTokensEmbeddings
-				origCopy = {unpack(originalTokensEmbeddings)}
-				tinsert(origCopy, wordEmbedding)
-				tinsert(alternativeTokensEmbeddings, origCopy)
-			end
-		end
-		
-		tinsert(originalTokensEmbeddings, tokenEmbedding)
-	end
+	-- Run SpellCheck to find alternative suggestions for misspelt words
+	-- Get word embeddings tokens and other possible alternative words
+	local allTokenCombinations = self:GetEmbeddings(tokens)
+	table.sort(allTokenCombinations, function(t1, t2) return t1.rank < t2.rank end)
 	
 	if not self.lstmLayer then self.lstmLayer = lstm:new(data.Weights.LSTM.Kernel, data.Weights.LSTM.Recurrent, data.Weights.LSTM.Bias) end
 	if not self.denseLayer then self.denseLayer = dense:new(data.Weights.Output.Kernel, data.Weights.Output.Bias) end
-	
+	-- Limit number of forward passes on LSTM layer to reduce processing time
+	-- Future update: Provide option to user for "enhanced mode" for more powerful computers
 	local maxScore = 0
-	tinsert(alternativeTokensEmbeddings, originalTokensEmbeddings)
-	for _, phrase in ipairs(alternativeTokensEmbeddings) do
+	local currPasses = 0
+	local cacheResult = { ['score'] = maxScore, ['threshold'] = toxicThreshold, ['terminatedEarly'] = false }
+	for i, phrase in ipairs(allTokenCombinations) do
 		local lstmOutput = self.lstmLayer:Predict(phrase, true)
 		local score = self.denseLayer:Predict(lstmOutput)[1][1]
-		if score > maxScore then maxScore = score end		
-		if score >= self.toxicThreshold then
-			self.classifyCache:set(tokensStr, maxScore)
+		if score > maxScore then maxScore = score; cacheResult.score = maxScore end
+		if score >= toxicThreshold then
+			cacheResult.terminatedEarly = i ~= #allTokenCombinations
+			self.classifyCache:set(tokensStr, cacheResult)
 			return true
 		end
+		currPasses = currPasses + #phrase
+		if currPasses >= self.maxPasses then break end
 	end
-	
-	self.classifyCache:set(tokensStr, maxScore)
+	self.classifyCache:set(tokensStr, cacheResult)
 	return false
 end
 
@@ -337,7 +337,7 @@ function classifier:new()
 	classifier.blank = data.BlankEmbedding
 	classifier.toxicThreshold = 0.99
 	classifier.maxPasses = 512
-	classifier.classifyCache = lruCache.new(5)
+	classifier.classifyCache = lruCache.new(100)
 	
 	return newClassifier
 end

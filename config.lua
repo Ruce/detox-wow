@@ -39,6 +39,10 @@ config.chatTypes = {
 		name = "Instance",
 		default = true,
 		events = { "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER" } },
+	["emote"] = {
+		name = "Emote",
+		default = true,
+		events = { "CHAT_MSG_EMOTE" } }
 }
 
 -- "Inverted" table where events are the keys, and keys from chatTypes table are values
@@ -65,6 +69,7 @@ config.profileDefaults = function()
 		t[k] = v.default
 	end
 	t["showNotification"] = true
+	t["throttleMode"] = true
 	t["whitelist"] = {}
 	t["whitelistFriends"] = true
 	t["whitelistGuild"] = true
@@ -93,6 +98,14 @@ config.detoxOptions = {
 							order = 10,
 							set = function(info, val) Detox.db.profile.showNotification = val end,
 							get = function(info) return Detox.db.profile.showNotification end
+						},
+						throttleMode = {
+							name = "Throttle Mode",
+							desc = "Temporarily block sender after multiple toxic messages",
+							type = "toggle",
+							order = 20,
+							set = function(info, val) Detox.db.profile.throttleMode = val end,
+							get = function(info) return Detox.db.profile.throttleMode end
 						}
 					}
 				},
