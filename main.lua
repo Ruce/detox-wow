@@ -4,10 +4,11 @@ Detox = LibStub("AceAddon-3.0"):NewAddon("Detox", "AceConsole-3.0", "AceHook-3.0
 
 local AceConfig = LibStub("AceConfig-3.0")
 local AceConfigDialog = LibStub("AceConfigDialog-3.0")
-local AceGUI = LibStub("AceGUI-3.0")
 
 local config = addonTbl.config
 local classifier = addonTbl.classifier
+
+local isRetail = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
 
 local detoxPrimaryColorStr = "|cff6DF551"
 local detoxSecondaryColorStr = "|cFF5BCFBB"
@@ -51,56 +52,75 @@ end
 local function IsTrustedSender(senderName, senderGuid)
 	-- Check if message sender is the player (self) or whitelisted
 	if senderGuid then
-		if IsPlayerGuid(senderGuid) or 
-		(Detox.db.profile.whitelistFriends and C_FriendList.IsFriend(senderGuid)) or
-		(Detox.db.profile.whitelistGuild and IsGuildMember(senderGuid)) or
-		(Detox.db.profile.whitelistBnet and C_BattleNet.GetAccountInfoByGUID(senderGuid) and C_BattleNet.GetAccountInfoByGUID(senderGuid)['isFriend']) then
-			return true
+		if isRetail then
+			if IsPlayerGuid(senderGuid) or 
+			(Detox.db.profile.whitelistFriends and C_FriendList.IsFriend(senderGuid)) or
+			(Detox.db.profile.whitelistGuild and IsGuildMember(senderGuid)) or
+			(Detox.db.profile.whitelistBnet and C_BattleNet.GetAccountInfoByGUID(senderGuid) and C_BattleNet.GetAccountInfoByGUID(senderGuid)['isFriend']) then
+				return true
+			end
+		else -- Classic
+			if C_AccountInfo.IsGUIDRelatedToLocalAccount(senderGuid) or
+			(Detox.db.profile.whitelistFriends and C_FriendList.IsFriend(senderGuid)) or
+			(Detox.db.profile.whitelistGuild and IsGuildMember(senderGuid)) then
+				return true
+			end
+			
+			-- Bnet friend info is returned only if the friend is online (does not work if they appear offline)
+			if Detox.db.profile.whitelistBnet then
+				local BNGameAccountInfo = {BNGetGameAccountInfoByGUID(senderGuid)}
+				local bNetIDAccount = BNGameAccountInfo[17]
+				if bNetIDAccount and BNIsFriend(bNetIDAccount) then
+					return true
+				end
+			end
 		end
 	end
 	
 	if senderName then
-		if config:IsWhitelisted(senderName) then
+		local hyphen = senderName:find('-') -- Find the hyphen for separating realm name from character name
+		if config:IsWhitelisted(senderName) or
+		(hyphen and config:IsWhitelisted(senderName:sub(1, hyphen - 1))) then
 			return true
 		end
 	end
 	return false
 end
 
-local chatBubbleEnabled = C_CVar.GetCVar("chatBubbles")
-local chatBubblePartyEnabled = C_CVar.GetCVar("chatBubblesParty")
-local chatBubbleOptionReset = true
-
+local chatBubbleOptions = {}
 local chatBubbleListener = CreateFrame("Frame", "DetoxChatBubbleListener", WorldFrame)
 chatBubbleListener:SetFrameStrata("TOOLTIP")
+chatBubbleListener:SetScript("OnUpdate", function(self, elapsed)
+	self:Stop()
+end)
+
+chatBubbleOptions['enabled'] = GetCVar("chatBubbles")
+chatBubbleOptions['partyEnabled'] = GetCVar("chatBubblesParty")
+chatBubbleOptions['reset'] = true
 
 function chatBubbleListener:Start()
 	-- Record user-defined setting for chat bubble display so it can be reverted afterwards
-	if chatBubbleOptionReset then
+	if chatBubbleOptions['reset'] then
 		-- Only save the user setting if it has been reset by the Stop() function
 		-- To prevent simultaneous Start() function calls from overwriting the saved setting
-		chatBubbleEnabled = C_CVar.GetCVar("chatBubbles")
-		chatBubblePartyEnabled = C_CVar.GetCVar("chatBubblesParty")
-		chatBubbleOptionReset = false
+		chatBubbleOptions['enabled'] = GetCVar("chatBubbles")
+		chatBubbleOptions['partyEnabled'] = GetCVar("chatBubblesParty")
+		chatBubbleOptions['reset'] = false
 	end
 	
 	-- Disable chat bubble for a toxic message
-	C_CVar.SetCVar("chatBubbles", 0)
-	C_CVar.SetCVar("chatBubblesParty", 0)
+	SetCVar("chatBubbles", 0)
+	SetCVar("chatBubblesParty", 0)
 	self:Show()
 end
 
 function chatBubbleListener:Stop()
 	self:Hide()
 	-- Reset chat bubble display option to user-defined setting
-	C_CVar.SetCVar("chatBubbles", chatBubbleEnabled)
-	C_CVar.SetCVar("chatBubblesParty", chatBubblePartyEnabled)
-	chatBubbleOptionReset = true
+	SetCVar("chatBubbles", chatBubbleOptions['enabled'])
+	SetCVar("chatBubblesParty", chatBubbleOptions['partyEnabled'])
+	chatBubbleOptions['reset'] = true
 end
-
-chatBubbleListener:SetScript("OnUpdate", function(self, elapsed)
-	self:Stop()
-end)
 
 function Detox:InitializeDb()
 	if self.db.global.blockedCount == nil then
@@ -141,6 +161,16 @@ function Detox:OnEnable()
 	self:RawHook("ChatFrame_MessageEventHandler", true)
 	self.enabled = true
 	Print("Message filter enabled (/detox for options)")
+	
+	-- Set default show message keybind to CTRL-G if it isn't in use
+	if GetBindingAction("CTRL-G") == '' then
+		SetBinding("CTRL-G", "DETOX_SHOW_MESSAGES")
+		if isRetail then
+			SaveBindings(GetCurrentBindingSet())
+		else
+			AttemptToSaveBindings(GetCurrentBindingSet())
+		end
+	end
 end
 
 function Detox:OnDisable()

@@ -1,5 +1,5 @@
 <Bindings>
-	<Binding name="DETOX_SHOW_MESSAGES" header="DETOX" category="ADDONS" default="CTRL-G">
+	<Binding name="DETOX_SHOW_MESSAGES" header="DETOX" category="ADDONS">
 		Detox.ShowHiddenChats()
 	</Binding>
 </Bindings>

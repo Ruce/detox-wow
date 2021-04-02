@@ -253,6 +253,7 @@ function classifier:GetEmbeddings(tokens)
 						origCopy.rank = origCopy.rank + index[i]
 						tinsert(origCopy, wordEmbedding)
 					end
+					tinsert(alternativeTokensEmbeddings, origCopy)
 				else
 					-- Index represents how common the word is; 0 = does not have embedding (UNK/OOV)
 					-- If the alternative word is OOV, it does not need to be added to the list since the original token is also OOV
@@ -260,9 +261,9 @@ function classifier:GetEmbeddings(tokens)
 						local wordEmbedding = embeddings[word] or unk
 						origCopy.rank = origCopy.rank + index
 						tinsert(origCopy, wordEmbedding)
+						tinsert(alternativeTokensEmbeddings, origCopy)
 					end
 				end
-				tinsert(alternativeTokensEmbeddings, origCopy)
 			end
 		end
 		
