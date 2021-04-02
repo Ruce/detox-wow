@@ -153,7 +153,7 @@ config.detoxOptions = {
 							get = function(info) return Detox.db.profile.whitelistGuild end
 						},
 						whitelistPlayersDescription = {
-							name = "\nAdd specific players to whitelist (must include realm name, e.g. PlayerName-Realm)",
+							name = "\nAdd specific players to whitelist",
 							type = "description",
 							order = 50
 						},
@@ -195,7 +195,7 @@ end
 
 function config:IsWhitelisted(name)
 	for _, player in ipairs(self.whitelist) do
-		if name == player.name then
+		if string.lower(name) == string.lower(player.name) then
 			return true
 		end
 	end
@@ -216,7 +216,7 @@ function config:ShowWhitelistFrame()
 	frame:SetLayout("Flow")
 	
 	local whitelistEditbox = AceGUI:Create("EditBox")
-	whitelistEditbox:SetLabel("Whitelist (PlayerName-Realm):")
+	whitelistEditbox:SetLabel("Whitelist (CharacterName):")
 	whitelistEditbox:SetRelativeWidth(0.78)
 	whitelistEditbox:SetCallback("OnEnterPressed", function(widget, event, text) self:AddToWhitelist(text); widget:SetText("") end)
 	frame:AddChild(whitelistEditbox)
