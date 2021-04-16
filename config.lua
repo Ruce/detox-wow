@@ -10,38 +10,47 @@ config.chatTypes = {
 	["say"] = {
 		name = "Say",
 		default = true,
+		order = 70,
 		events = { "CHAT_MSG_SAY" } },
 	["yell"] = {
 		name = "Yell",
 		default = true,
+		order = 90,
 		events = { "CHAT_MSG_YELL" } },
 	["guild"] = {
 		name = "Guild",
 		default = false,
+		order = 30,
 		events = { "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER" } },
 	["whisper"] = {
 		name = "Whisper",
 		default = true,
+		order = 80,
 		events = { "CHAT_MSG_WHISPER" } },
 	["bnet"] = {
 		name = "Battle.net",
 		default = false,
+		order = 10,
 		events = { "CHAT_MSG_BN_WHISPER" } },
 	["party"] = {
 		name = "Party",
 		default = true,
+		order = 50,
 		events = { "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER" } },
 	["raid"] = {
 		name = "Raid",
 		default = true,
+		order = 60,
 		events = { "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER" } }, -- Does not include CHAT_MSG_RAID_WARNING
 	["instance"] = {
 		name = "Instance",
 		default = true,
+		order = 40,
 		events = { "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER" } },
 	["emote"] = {
 		name = "Emote",
 		default = true,
+		order = 20,
 		events = { "CHAT_MSG_EMOTE" } }
 }
 
@@ -178,6 +187,54 @@ config.detoxOptions = {
 		}
 	}
 }
+
+function config.GetStatsTable()
+	local statsTab = {
+		name = "Stats",
+		type = "group",
+		args = {
+			overallHeader = {
+				name = "Overall",
+				type = "header",
+				order = 0
+			},
+			blockedMessages = {
+				name = function() return "Total toxic messages blocked: "..NORMAL_FONT_COLOR_CODE..tostring(Detox.history:GetToxicMessageCount())..FONT_COLOR_CODE_CLOSE end,
+				type = "description",
+				fontSize = "medium",
+				order = 10
+			},
+			uniquePlayers = {
+				name = function() return "Unique senders of toxic messages: "..NORMAL_FONT_COLOR_CODE..tostring(Detox.history:GetUniqueSendersBlocked())..FONT_COLOR_CODE_CLOSE end,
+				type = "description",
+				fontSize = "medium",
+				order = 20
+			},
+			lineBreak = {
+				name = " ",
+				type = "description",
+				order = 25
+			},
+			channelHeader = {
+				name = "Messages Blocked Per Channel",
+				type = "header",
+				order = 30
+			}
+		}
+	}
+	
+	local baseChannelOrder = 40
+	for channel, channelDetails in pairs(config.chatTypes) do
+		statsTab.args[channel] = {
+				name = function() return channelDetails.name..": "..NORMAL_FONT_COLOR_CODE..tostring(Detox.history:GetChannelStat(channel))..FONT_COLOR_CODE_CLOSE end,
+				type = "description",
+				fontSize = "medium",
+				order = baseChannelOrder + channelDetails.order
+			}
+	end
+	
+	return statsTab
+end
 
 function config:AddToWhitelist(name)
 	table.insert(self.whitelist, { name = name })
