@@ -8,6 +8,7 @@ local AceConfigDialog = LibStub("AceConfigDialog-3.0")
 local config = addonTbl.config
 local classifier = addonTbl.classifier
 local history = addonTbl.history
+local util = addonTbl.util
 
 local isRetail = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
 
@@ -15,10 +16,17 @@ local detoxPrimaryColorStr = "|cff6DF551"
 local detoxSecondaryColorStr = "|cFF5BCFBB"
 local detoxChatHiddenMessage = "(Detox) Toxic message hidden - click to show"
 local detoxChatThrottledMessage = "(Detox) Throttle Mode: Blocking sender temporarily..."
-local detoxToxicThresholdHigh = 0.98
-local detoxToxicThresholdLow = 0.94
-local detoxToxicThresholdMaxGain = 0.01
+local detoxToxicThresholdBaseline = 0.97
+local detoxToxicStrictMultiplier = 2.0
+local detoxToxicStrictFactor = 0.02 -- Will be scaled up by StrictMultiplier
+local detoxToxicStrangerFactor = 0.02
+local detoxToxicThrottleFactor = 0.05
 
+local detoxProtectCriticalTime = 120
+local detoxProtectHighTime = 600
+local detoxProtectDeathFactor = 0.04
+local detoxProtectCriticalFactor = 0.06
+local detoxProtectHighFactor = 0.05
 
 local detoxHiddenChats = {}
 local detoxSenderHistory = {}
@@ -48,6 +56,30 @@ local function RecreateChat(chat)
 		local nameStr = string.format("|c%s%s|r", classColorHex, name)
 		return string.format("%s %s said: %s", timestampStr, nameStr, message)
 	end
+end
+
+local bnetFriendsCache = {}
+local function GetBnetTag(Kstring)
+	if bnetFriendsCache[Kstring] then return bnetFriendsCache[Kstring] end
+	
+	local totalNumFriends = BNGetNumFriends()
+	for i = 1, totalNumFriends do
+		local accountName = nil
+		local battleTag = nil
+		if isRetail then
+			local accountInfo = C_BattleNet.GetFriendAccountInfo(i)
+			accountName = accountInfo.accountName
+			battleTag = accountInfo.battleTag
+		else
+			_, accountName, battleTag = BNGetFriendInfo(i)
+		end
+		bnetFriendsCache[accountName] = battleTag
+		if accountName == Kstring then
+			return battleTag
+		end
+	end
+	
+	return nil
 end
 
 local function IsTrustedSender(senderName, senderGuid)
@@ -123,9 +155,75 @@ function chatBubbleListener:Stop()
 	chatBubbleOptions['reset'] = true
 end
 
+local deathHistory = {}
+
+local function OnCombatEvent(self, event)
+	local timestamp, subevent, _, sourceGUID, sourceName, _, _, destGUID, destName = CombatLogGetCurrentEventInfo()
+	if subevent == "UNIT_DIED" then
+		local unitType = strsplit("-", destGUID)
+		if unitType == "Player" then
+			if UnitInParty(destName) or UnitInRaid(destName) then
+				-- UnitInParty/Raid returns nil if player is not in a party
+				-- i.e. this does not check if the player died when by themself
+				-- We only want to trigger protect mode when in a group with other players
+				-- But still check if the player who died is in party/raid for PVP situations
+				local deathEvent = { ['timestamp'] = timestamp }
+				
+				-- Record the group members who witnessed the death
+				local groupMembers = {}
+				for i = 1, GetNumGroupMembers() do
+					local groupMemberName = GetRaidRosterInfo(i)
+					local groupMemberGUID = UnitGUID(groupMemberName)
+					groupMembers[groupMemberGUID] = true
+				end
+				deathEvent['groupMembers'] = groupMembers
+				table.insert(deathHistory, deathEvent)
+			end
+		end
+	end
+end
+
+local combatListener = CreateFrame("Frame", "CombatListener", WorldFrame)
+combatListener:SetFrameStrata("TOOLTIP")
+combatListener:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+combatListener:SetScript("OnEvent", OnCombatEvent)
+
+local function GetProtectFactor(currTime, senderGuid)
+	-- Calculate the protection offered to player based on the sender of message
+	-- Only protect against senders who witnessed recent deaths
+	if senderGuid == nil or senderGuid == '' then return 0 end
+	
+	local recentDeathsCritical = 0
+	local recentDeathsHigh = 0
+	local mostRecentDeath = 0
+	local maxGroupMembers = 1
+	for _, deathEvent in ipairs(deathHistory) do
+		if deathEvent.groupMembers[senderGuid] then
+			local timestamp = deathEvent.timestamp
+			if timestamp > mostRecentDeath then mostRecentDeath = timestamp end
+			if currTime - timestamp <= detoxProtectCriticalTime then recentDeathsCritical = recentDeathsCritical + 1 end
+			if currTime - timestamp <= detoxProtectHighTime then
+				recentDeathsHigh = recentDeathsHigh + 1
+				local numGroupMembers = util.TableLength(deathEvent.groupMembers)
+				if numGroupMembers > maxGroupMembers then maxGroupMembers = numGroupMembers end
+			end
+		end
+	end
+	
+	if mostRecentDeath == 0 then return 0 end
+	
+	local deathFractionCritical = recentDeathsCritical / maxGroupMembers
+	local deathFractionHigh = recentDeathsHigh / maxGroupMembers
+	local protectFactor = detoxProtectDeathFactor * math.min(recentDeathsCritical, 1) +
+		detoxProtectCriticalFactor * math.tanh(deathFractionCritical) +
+		detoxProtectHighFactor * math.tanh(deathFractionHigh)
+	
+	return protectFactor
+end
+
 function Detox:InitializeDb()
-	if self.db.global.blockedCount == nil then
-		self.db.global.blockedCount = 0
+	if self.db.global.strictFilter == nil then
+		self.db.global.strictFilter = false
 	end
 	
 	local profileDefaults = config.profileDefaults()
@@ -163,6 +261,10 @@ function Detox:OnInitialize()
 	-- Because existing profiles will not have new variables when upgrading the addon
 	self:InitializeDb()
 	self:RefreshConfig()
+	
+	if not self.db.global.introWindowShown then
+		config:ShowIntroWindow()
+	end
 end
 
 function Detox:OnEnable()
@@ -251,10 +353,16 @@ function Detox:ParseMessage(chatFrame, event, ...)
 	local chatLineID = args[11]
 	local outputMessage = message
 	
-	local senderId = senderGuid
-	if senderGuid == nil or senderGuid == '' or senderGuid == 0 then senderId = tostring(sender) end
-	
 	if self.enabled and message then
+		local senderId = senderGuid
+		if (senderGuid == nil or senderGuid == '' or senderGuid == 0) and sender then
+			if string.sub(sender, 1, 2) == "|K" then -- BNet Kstring
+				senderId = GetBnetTag(sender)
+			else
+				senderId = sender
+			end
+		end
+	
 		-- Check if the event was already processed, i.e. when a chat is presented by multiple chatFrames
 		if detoxPrevChatLine['chatLineID'] == chatLineID then
 			if detoxPrevChatLine['blocked'] then
@@ -273,9 +381,13 @@ function Detox:ParseMessage(chatFrame, event, ...)
 			local senderStatus = self.history:GetPlayerStatus(senderId, currTime)
 			-- Block sender if throttle mode is on and multiple toxic messages were received
 			local senderThrottled = self.db.profile.throttleMode and senderStatus == history.PLAYER_STATUS_THROTTLED
-			local toxicityThreshold = (senderThrottled and detoxToxicThresholdLow) or detoxToxicThresholdHigh
+			local throttleFactor = (senderThrottled and detoxToxicThrottleFactor) or 0
+			local protectFactor = GetProtectFactor(currTime, senderGuid)
 			local friendFactor = self.history:GetPlayerFriendFactor(senderId)
-			toxicityThreshold = toxicityThreshold + (detoxToxicThresholdMaxGain * friendFactor)
+			local thresholdPenalty = (detoxToxicStrangerFactor + throttleFactor + protectFactor) * (1 - friendFactor)
+			-- strictFactor does not get scaled by friendFactor
+			if self.db.global.strictFilter then thresholdPenalty = (thresholdPenalty + detoxToxicStrictFactor) * detoxToxicStrictMultiplier end
+			local toxicityThreshold = detoxToxicThresholdBaseline - thresholdPenalty
 			
 			-- Determine if message is toxic with the calculated toxicityThreshold
 			local toxic = self.classifier:Classify(message, toxicityThreshold)
@@ -296,7 +408,7 @@ function Detox:ParseMessage(chatFrame, event, ...)
 				chatBubbleListener:Start()
 				
 				local hyperlink = "detox:show:" .. tostring(chatLineID)
-				if senderStatus == history.PLAYER_STATUS_RISK then
+				if senderStatus == history.PLAYER_STATUS_RISK and self.db.profile.throttleMode then
 					outputMessage = string.format("%s|H%s|h%s|h", detoxSecondaryColorStr, hyperlink, detoxChatThrottledMessage)
 				else
 					outputMessage = string.format("%s|H%s|h%s|h", detoxSecondaryColorStr, hyperlink, detoxChatHiddenMessage)

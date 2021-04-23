@@ -4,26 +4,10 @@ local dense = addonTbl.dense
 local lstm = addonTbl.lstm
 local lruCache = addonTbl.lru
 local data = addonTbl.data
+local util = addonTbl.util
 
 local tinsert = table.insert
 local tremove = table.remove
-
--- Count the number of values in a table; the # function only (sort of) works for integer-indexed tables
-local function tableLength(table1)
-	local counter = 0
-	for _,_ in pairs(table1) do
-		counter = counter + 1
-	end
-	return counter
-end
-
-local function shallowCopy(table1)
-	local t = {}
-	for k,v in pairs(table1) do
-		t[k] = v
-	end
-	return t
-end
 
 local function known(words, dictionary, minLength)
 	local knownWords = {}
@@ -245,7 +229,7 @@ function classifier:GetEmbeddings(tokens)
 			for _, suggestion in ipairs(knownWords) do
 				local word = suggestion.word
 				local index = suggestion.index
-				local origCopy = shallowCopy(originalTokensEmbeddings)
+				local origCopy = util.ShallowCopyTable(originalTokensEmbeddings)
 				if type(word) == "table" then
 					-- Handle word pairs
 					for i, splitWord in ipairs(word) do

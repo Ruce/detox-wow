@@ -6,6 +6,7 @@ Detox is an addon for World of Warcraft that automatically hides toxic chat mess
 - Whitelist players so their messages are never filtered
 - Friends and guild members are automatically whitelisted
 - Enable/disable filtering on certain channels, e.g. Guild chat
+- Choose between lenient and strict filtering
 - Hotkey to show hidden messages (default is Ctrl-G)
 - Throttle mode blocks toxic message spam
 

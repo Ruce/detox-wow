@@ -1,7 +1,7 @@
 ## Interface: 90005
 ## Title: Detox
 ## Author: Vinnesta
-## Version: 2.2.0
+## Version: 3.0.1
 
 ## SavedVariables: DetoxDB
 
@@ -24,6 +24,7 @@ nn\activation.lua
 nn\dense.lua
 nn\lstm.lua
 
+util.lua
 templates.xml
 config.lua
 

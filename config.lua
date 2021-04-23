@@ -95,7 +95,7 @@ config.detoxOptions = {
 			type = "group",
 			args = {
 				displayOptions = {
-					name = "Display Options",
+					name = "Main Options",
 					type = "group",
 					order = 1,
 					inline = true,
@@ -115,6 +115,14 @@ config.detoxOptions = {
 							order = 20,
 							set = function(info, val) Detox.db.profile.throttleMode = val end,
 							get = function(info) return Detox.db.profile.throttleMode end
+						},
+						strictFilter = {
+							name = "Strict Filter",
+							desc = "A strict filter blocks more messages",
+							type = "toggle",
+							order = 30,
+							set = function(info, val) Detox.db.global.strictFilter = val end,
+							get = function(info) return Detox.db.global.strictFilter end
 						}
 					}
 				},
@@ -349,6 +357,66 @@ function config:ReleaseWhitelistFrame()
 		self.whitelistFrame:SetParent(nil)
 		self.whitelistFrame:Hide()
 	end
+end
+
+local function OnClickFilterPreference(button)
+	Detox.db.global.introWindowShown = true
+	Detox.db.global.strictFilter = button.strict
+	button.window:Hide()
+end
+
+function config:ShowIntroWindow()
+	local window = AceGUI:Create("Window")
+	window:SetWidth(340)
+	window:SetHeight(188)
+	window:EnableResize(false)
+	window:SetTitle("Detox")
+	window:SetLayout("Flow")
+	window:SetPoint("CENTER",UIParent,"CENTER",0,-200)
+	
+	local topHeading = AceGUI:Create("Heading")
+	topHeading:SetRelativeWidth(1)
+	window:AddChild(topHeading)
+	
+	local introductionLabel = AceGUI:Create("Label")
+	introductionLabel:SetRelativeWidth(1)
+	introductionLabel:SetFontObject(GameFontHighlight)
+	introductionLabel:SetJustifyH("CENTER")
+	introductionLabel:SetText("Welcome to Detox, your shield against toxic chat.")
+	window:AddChild(introductionLabel)
+	
+	local chooseLabel = AceGUI:Create("Label")
+	chooseLabel:SetRelativeWidth(.99)
+	chooseLabel:SetFontObject(GameFontHighlight)
+	chooseLabel:SetJustifyH("CENTER")
+	chooseLabel:SetText("Choose your preferred level of toxicity filtering - a strict filter blocks more messages:")
+	window:AddChild(chooseLabel)
+	
+	local lenientButton = AceGUI:Create("Button")
+	lenientButton:SetText("Lenient Filter")
+	lenientButton:SetRelativeWidth(0.5)
+	lenientButton.strict = false
+	lenientButton.window = window
+	lenientButton:SetCallback("OnClick", function(button) OnClickFilterPreference(button) end)
+	window:AddChild(lenientButton)
+	
+	local strictButton = AceGUI:Create("Button")
+	strictButton:SetText("Strict Filter")
+	strictButton:SetRelativeWidth(0.5)
+	strictButton.strict = true
+	strictButton.window = window
+	strictButton:SetCallback("OnClick", function(button) OnClickFilterPreference(button) end)
+	window:AddChild(strictButton)
+	
+	local bottomHeading = AceGUI:Create("Heading")
+	bottomHeading:SetRelativeWidth(1)
+	window:AddChild(bottomHeading)
+	
+	local bottomLabel = AceGUI:Create("Label")
+	bottomLabel:SetJustifyH("CENTER")
+	bottomLabel:SetText("This setting can be changed in the options menu (/detox)")
+	bottomLabel:SetRelativeWidth(1)
+	window:AddChild(bottomLabel)
 end
 
 addonTbl.config = config
