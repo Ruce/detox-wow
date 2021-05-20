@@ -11,6 +11,7 @@ local history = addonTbl.history
 local util = addonTbl.util
 
 local isRetail = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE)
+local isTBC = (WOW_PROJECT_ID == WOW_PROJECT_BURNING_CRUSADE_CLASSIC)
 
 local detoxPrimaryColorStr = "|cff6DF551"
 local detoxSecondaryColorStr = "|cFF5BCFBB"
@@ -273,12 +274,13 @@ function Detox:OnEnable()
 	Print("Message filter enabled (/detox for options)")
 	
 	-- Set default show message keybind to CTRL-G if it isn't in use
-	if GetBindingAction("CTRL-G") == '' then
+	local currentBindingSet = GetCurrentBindingSet()
+	if GetBindingAction("CTRL-G") == '' and (currentBindingSet == 1 or currentBindingSet == 2) then
 		SetBinding("CTRL-G", "DETOX_SHOW_MESSAGES")
-		if isRetail then
-			SaveBindings(GetCurrentBindingSet())
+		if isRetail or isTBC then
+			SaveBindings(currentBindingSet)
 		else
-			AttemptToSaveBindings(GetCurrentBindingSet())
+			AttemptToSaveBindings(currentBindingSet)
 		end
 	end
 end
