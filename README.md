@@ -1,6 +1,6 @@
 # Detox
 
-[!Chat Screenshot](/images/ChatScreenshot.png?raw=true "Screenshot")
+![Chat Screenshot](/images/ChatScreenshot.png?raw=true "Screenshot")
 
 Detox is an addon for World of Warcraft that automatically hides toxic chat messages. Never have your day ruined again by an unprompted whisper saying "you suck!" after a dungeon, raid, battleground, or arena match.
 
@@ -16,7 +16,7 @@ Available on CurseForge: (https://www.curseforge.com/wow/addons/detox)
 
 ## Configuration
 
-[!Configuration Settings](/images/ConfigurationSettings.png?raw=true "Configuration")
+![Configuration Settings](/images/ConfigurationSettings.png?raw=true "Configuration")
 
 The configuration settings menu can be found in the Addon &rarr; Detox section from the in-game menu ('Esc').
 
